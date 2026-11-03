@@ -189,6 +189,7 @@ const view = $('#view'), guide = $('#guide');
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function fmtDate(s){ const [y,m,d]=s.split('-').map(Number); return `${m}/${d}(${'일월화수목금토'[new Date(y,m-1,d).getDay()]})`; }
 function fmtW(n){ return (Math.round(n*10)/10).toString(); }
+function fmtDur(sec){ sec=Math.round(sec||0); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), x=sec%60; return h?`${h}시간 ${m}분`:(m?`${m}분 ${x}초`:`${x}초`); }
 function fmtSec(s){ s=Math.max(0,s); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
 function restTxt(sec){ if(!sec) return '바로 다음 운동'; const m=Math.floor(sec/60), s=sec%60; return (m?m+'분':'')+(m&&s?' ':'')+(s?s+'초':''); }
 function esc(s){ return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -302,7 +303,9 @@ document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==
 function startGuide(){
   initAudio(); steps=buildSteps(draft.type);
   wk={on:true,phase:'ready',idx:0,prev:null,start:0,end:0,ticked:{}};
-  keepAwake(); renderGuide(); renderTodayKeep(); scrollToNow();
+  if(!draft.startedAt || draft.duration==null) { draft.startedAt=Date.now(); draft.duration=0; }
+  else { draft.startedAt=Date.now()-draft.duration*1000; }
+  keepAwake(); runTimer(); renderGuide(); renderTodayKeep(); scrollToNow();
 }
 function stopGuide(){
   wk={on:false,phase:'idle',idx:0,prev:null,start:0,end:0,ticked:{}};
@@ -313,8 +316,9 @@ function setStart(){
 }
 async function setEnd(){
   const st=steps[wk.idx]; wk.prev=wk.idx; wk.idx++;
+  if(draft.startedAt) draft.duration=Math.round((Date.now()-draft.startedAt)/1000);
   if(wk.idx>=steps.length){ wk.phase='done'; clearInterval(timer); timer=null; beep(784,0.2,0); beep(988,0.2,0.22); beep(1319,0.5,0.44); }
-  else if(!st.rest && !st.extra){ wk.phase='go'; softGo(); }
+  else if(!st.rest && !st.extra){ wk.phase='go'; softGo(); runTimer(); }
   else { wk.phase='rest'; wk.end=Date.now()+(st.rest+(st.extra||0))*1000; wk.ticked={}; runTimer(); }
   renderGuide(); renderTodayKeep(); if(wk.phase==='go') scrollToNow();
   await saveSession(true);
@@ -322,11 +326,12 @@ async function setEnd(){
 function runTimer(){ clearInterval(timer); timer=setInterval(tickFn,250); tickFn(); }
 function tickFn(){
   if(!wk.on) return;
+  const tt=$('#gtotal'); if(tt && draft.startedAt && wk.phase!=='done') tt.textContent='총 운동 시간 '+fmtSec(Math.floor((Date.now()-draft.startedAt)/1000));
   const el=$('#gclock');
   if(wk.phase==='work'){ if(el) el.textContent=fmtSec(Math.floor((Date.now()-wk.start)/1000)); }
   else if(wk.phase==='rest'){
     const remain=Math.ceil((wk.end-Date.now())/1000);
-    if(remain<=0){ clearInterval(timer); timer=null; wk.phase='go'; alarmGo(); renderGuide(); renderTodayKeep(); scrollToNow(); return; }
+    if(remain<=0){ wk.phase='go'; alarmGo(); renderGuide(); renderTodayKeep(); scrollToNow(); return; }
     if(el) el.textContent=fmtSec(remain);
     if(remain<=3 && !wk.ticked[remain]){ wk.ticked[remain]=true; beep(660,0.12); }
   }
@@ -363,11 +368,11 @@ function renderGuide(){
       <span class="v">${v}</span>
       <button class="step" data-gstep="1" aria-label="1회 더하기">+</button><span>회</span></div>`;
   }
-  const stopLink=`<button class="g-link" data-act="stop">가이드 끝내기</button>`;
+  const stopLink=`<div style="display:flex;justify-content:space-between;align-items:center"><button class="g-link" data-act="stop">가이드 끝내기</button><span class="g-sub" id="gtotal" style="padding-top:6px"></span></div>`;
   let html='';
   if(wk.phase==='done'){
     guide.className='guide on';
-    html=`<div class="g-lbl">근력 운동 끝</div><div class="g-title">수고했어요!</div>
+    html=`<div class="g-lbl">근력 운동 끝</div><div class="g-title">수고했어요! 총 ${fmtDur(draft.duration)}</div>
       <div class="g-sub">경사 걷기 ${draft.walk.min||20}분 하고, 아래에 기록한 뒤 저장하세요.</div>
       ${prevRow}<div class="g-row"><button class="g-btn" data-act="save">기록 저장</button></div>${stopLink}`;
   } else {
@@ -415,7 +420,7 @@ guide.addEventListener('click', async e=>{
   else if(a==='stop') stopGuide();
   else if(a==='setStart') setStart();
   else if(a==='setEnd') setEnd();
-  else if(a==='skip'){ clearInterval(timer); timer=null; wk.phase='go'; renderGuide(); renderTodayKeep(); scrollToNow(); }
+  else if(a==='skip'){ wk.phase='go'; renderGuide(); renderTodayKeep(); scrollToNow(); }
   else if(a==='plus30'){ wk.end+=30000; wk.ticked={}; tickFn(); }
   else if(a==='save'){ const ok=await saveSession(false); if(ok && wk.phase==='done') stopGuide(); }
 });
@@ -444,6 +449,7 @@ function renderToday(){
     <button class="plate back" data-type="back" aria-pressed="${draft.type==='back'}">등</button>
   </div>
   <div class="daterow"><input type="date" id="dateIn" value="${draft.date}" aria-label="운동 날짜"></div>
+  ${draft.duration?`<p class="note" style="margin-bottom:4px">총 운동 시간 <b>${fmtDur(draft.duration)}</b></p>`:''}
   <p class="note">${isSun?'일요일은 쉬는 날이에요. 쉬어야 근육이 자라요.':existing?'저장된 기록이 있어요. 고치고 다시 저장하면 바뀌어요.':''}</p>`;
   r.ex.forEach((e,k)=>{
     const cur=draft.ex[e.id], last=lastExRecord(e.id,draft.date);
@@ -496,7 +502,7 @@ function renderToday(){
 
 function exName(type,id){ const e=ROUTINES[type]&&exDef(type,id); return e?e.name:(OLD_NAMES[id]||id); }
 function workoutRows(){
-  const rows=[['날짜','요일','루틴','운동','세트','무게(kg)','횟수','메모']];
+  const rows=[['날짜','요일','루틴','운동','세트','무게(kg)','횟수','메모','총 운동시간(분)']];
   const list=[...state.sessions].sort((a,b)=>a.date.localeCompare(b.date));
   for(const s of list){
     const [y,m,d]=s.date.split('-').map(Number), wd='일월화수목금토'[new Date(y,m-1,d).getDay()];
@@ -505,7 +511,7 @@ function workoutRows(){
     let first=true;
     for(const id of order){
       const x=s.ex[id]; if(!x) continue;
-      x.reps.forEach((r,i)=>{ rows.push([s.date,wd,rt,exName(s.type,id),i+1,x.weight===''||x.weight==null?'':x.weight,r, first?(s.memo||''):'']); first=false; });
+      x.reps.forEach((r,i)=>{ rows.push([s.date,wd,rt,exName(s.type,id),i+1,x.weight===''||x.weight==null?'':x.weight,r, first?(s.memo||''):'', first&&s.duration?Math.round(s.duration/6)/10:'']); first=false; });
     }
     if(s.walk&&s.walk.min) rows.push([s.date,wd,rt,'경사 걷기','','','',`${s.walk.min}분 · 경사 ${s.walk.incline}% · ${s.walk.speed}km/h`]);
   }
@@ -548,7 +554,7 @@ function renderHist(){
     const memo=s.memo?`<li>메모 <span>${esc(s.memo)}</span></li>`:'';
     const key=s.date+'|'+s.type;
     return `<article class="hist" style="--accent:${r.color}">
-      <div class="top"><span class="d">${fmtDate(s.date)}</span><span class="t">${r.name}</span></div>
+      <div class="top"><span class="d">${fmtDate(s.date)}</span><span class="t">${r.name}${s.duration?` · ${fmtDur(s.duration)}`:''}</span></div>
       <ul>${items}${walk}${memo}</ul>
       <div class="rowbtns"><button class="small" data-edit="${key}">고치기</button>
       <button class="small danger" data-del="${key}">${pendingDelete===key?'한 번 더 누르면 삭제':'삭제'}</button></div></article>`;
