@@ -85,12 +85,16 @@ select.num{appearance:none;-webkit-appearance:none;text-align:center;text-align-
 .wrow select.num{width:110px}
 .unit{font-size:14px;color:var(--muted)}
 .set{display:flex;align-items:center;gap:10px;margin-top:8px}
-.set .lbl{width:64px;font-size:14px;color:var(--muted)}
+.set .lbl{flex:0 0 64px;width:64px;font-size:14px;color:var(--muted)}
 .step{width:46px;height:46px;border-radius:6px;border:1px solid var(--line);background:var(--surface2);color:var(--ink);font-size:18px;line-height:1}
 .step:active{background:var(--line)}
 .wrow .step{width:44px}
-.set .num{width:76px}
-.hit{font-size:13px;font-weight:700;color:var(--good)}
+.set .num{width:76px;flex:0 0 auto}
+.set .step{flex:0 0 auto}
+.same{white-space:nowrap}
+.hit{font-size:13px;font-weight:700;color:var(--good);white-space:nowrap}
+.same{font-size:12px;color:var(--muted);line-height:1.2}
+.set .lbl small{display:block;font-size:12px;color:var(--go);margin-top:2px}
 
 .block{background:var(--surface);border-radius:6px;padding:16px;margin-bottom:12px}
 .block h2{font-family:var(--disp);font-weight:400;font-size:20px;margin:0 0 8px}
@@ -113,6 +117,8 @@ input[type=date]{font:inherit;font-size:15px;padding:7px 10px;border-radius:6px;
 .g-sub{font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}
 .g-clock{font-family:var(--numf);font-size:84px;text-align:center;line-height:1;margin:4px 0;letter-spacing:.03em}
 .g-row{display:flex;gap:8px;margin-top:10px}
+.g-prevrec{display:inline-block;margin-top:6px;font-size:14px;font-weight:700;color:var(--go);background:rgba(244,194,13,.12);padding:4px 10px;border-radius:4px}
+.guide.go .g-prevrec{color:var(--go-ink);background:rgba(0,0,0,.12)}
 .g-btn{flex:1;padding:16px;border:0;border-radius:8px;background:var(--accent,var(--chest));color:#fff;font-family:var(--disp);font-size:21px;
   box-shadow:0 4px 0 rgba(0,0,0,.35)}
 .g-btn:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.35)}
@@ -286,7 +292,11 @@ function buildDraft(date,type){
       weight=last.weight;
       if(e.inc&&allHit(e,last)) weight=Math.round((Number(last.weight)+e.inc)*10)/10;
     }
-    const reps=[]; for(let i=0;i<e.sets;i++) reps.push(e.target??(last&&last.reps[i]?last.reps[i]:0));
+    const raised = e.w && last && last.weight!=='' && weight!=='' && Number(weight)>Number(last.weight);
+    const reps=[]; for(let i=0;i<e.sets;i++){
+      const lr = last && last.reps[i]!=null ? last.reps[i] : null;
+      reps.push(raised ? (e.target??lr??0) : (lr ?? e.target ?? 0));
+    }
     d.ex[e.id]={weight,reps};
   }
   return d;
@@ -387,7 +397,12 @@ function stepInfo(st){
   const e=exDef(draft.type,st.id), cur=draft.ex[st.id];
   const tgt=e.target?`목표 ${e.target}회`:'최대 개수';
   const w=e.w?(cur.weight!==''?` · ${fmtW(cur.weight)}kg`:' · 무게 미입력'):'';
-  return {e, title:e.name, sub:`${st.i+1}/${e.sets}세트 · ${tgt}${w}`};
+  const last=lastExRecord(st.id,draft.date);
+  let prev='';
+  if(last && last.reps[st.i]!=null){
+    prev = `지난번 ${e.w&&last.weight!==''?fmtW(last.weight)+'kg × ':''}${last.reps[st.i]}회`;
+  }
+  return {e, title:e.name, sub:`${st.i+1}/${e.sets}세트 · ${tgt}${w}`, prev};
 }
 
 function renderGuide(){
@@ -422,11 +437,11 @@ function renderGuide(){
     const warm = st.i===0 && info.e.warm ? `<div class="g-sub">${info.e.warm}</div>` : '';
     if(wk.phase==='ready'){
       guide.className='guide on';
-      html=`<div class="g-lbl">첫 운동</div><div class="g-title">${info.title}</div><div class="g-sub">${info.sub}</div>${warm}
+      html=`<div class="g-lbl">첫 운동</div><div class="g-title">${info.title}</div><div class="g-sub">${info.sub}</div>${info.prev?`<div class="g-prevrec">${info.prev}</div>`:''}${warm}
         <div class="g-row"><button class="g-btn" data-act="setStart">세트 시작</button></div>${stopLink}`;
     } else if(wk.phase==='work'){
       guide.className='guide on';
-      html=`<div class="g-lbl">운동 중</div><div class="g-title">${info.title}</div><div class="g-sub">${info.sub}</div>
+      html=`<div class="g-lbl">운동 중</div><div class="g-title">${info.title}</div><div class="g-sub">${info.sub}</div>${info.prev?`<div class="g-prevrec">${info.prev} — 이것보다 하나 더!</div>`:''}
         <div class="g-clock" id="gclock">0:00</div>
         <div class="g-row"><button class="g-btn" data-act="setEnd">세트 끝</button></div>${stopLink}`;
     } else if(wk.phase==='rest'){
@@ -435,13 +450,13 @@ function renderGuide(){
       const moveLine = pv && pv.extra ? `<div class="g-sub">${pv.sameGear ? `${info.e.gear}에서 ${info.title} 자세로 세팅하세요` : `<b>${ro(info.e.gear)}</b> 이동해서 세팅하세요`}</div>` : '';
       html=`<div class="g-lbl">쉬는 시간${mvTxt}</div>
         <div class="g-clock" id="gclock">${fmtSec(Math.ceil((wk.end-Date.now())/1000))}</div>
-        <div class="g-sub">다음: <b>${info.title}</b> · ${info.sub}</div>${moveLine}${warm}
+        <div class="g-sub">다음: <b>${info.title}</b> · ${info.sub}</div>${info.prev?`<div class="g-prevrec">${info.prev}</div>`:''}${moveLine}${warm}
         <div class="g-row"><button class="g-btn sec" data-act="plus30">+30초</button>
         <button class="g-btn" data-act="skip">바로 시작</button></div>${prevRow}${stopLink}`;
     } else if(wk.phase==='go'){
       guide.className='guide on go';
       html=`<div class="g-lbl">${steps[wk.prev] && !steps[wk.prev].rest ? '슈퍼세트 · 쉬지 말고 바로' : '쉬는 시간 끝'}</div>
-        <div class="g-title">시작하세요! ${info.title}</div><div class="g-sub">${info.sub}</div>${warm}
+        <div class="g-title">시작하세요! ${info.title}</div><div class="g-sub">${info.sub}</div>${info.prev?`<div class="g-prevrec">${info.prev}</div>`:''}${warm}
         <div class="g-row"><button class="g-btn" data-act="setStart">세트 시작</button></div>${prevRow}${stopLink}`;
     }
   }
@@ -519,11 +534,21 @@ function renderToday(){
         <select class="num" id="w-${e.id}" data-w="${e.id}">${opts(0,wMax(e),wStep(e),cur.weight,0,'선택')}</select>
         <button class="step" data-wstep="${e.id}" data-d="1" aria-label="무게 올리기">▶</button>
         <span class="unit">kg</span></div>`:''}
-      ${cur.reps.map((v,i)=>`<div class="set"><span class="lbl">${i+1}세트</span>
+      ${cur.reps.map((v,i)=>{
+        const lr = last && last.reps[i]!=null ? last.reps[i] : null;
+        const heavier = e.w && last && last.weight!=='' && cur.weight!=='' && Number(cur.weight)>Number(last.weight);
+        const lighter = e.w && last && last.weight!=='' && cur.weight!=='' && Number(cur.weight)<Number(last.weight);
+        let badge='';
+        if(lr!=null && !lighter){
+          if(heavier && v>=lr) badge='<span class="hit">▲ 무게 UP</span>';
+          else if(v>lr) badge=`<span class="hit">▲ +${v-lr}</span>`;
+          else if(v===lr) badge='<span class="same">＝ 같음</span>';
+        } else if(lr==null && e.target && v>=e.target) badge='<span class="hit">목표 달성</span>';
+        return `<div class="set"><span class="lbl">${i+1}세트${lr!=null?`<small>지난 ${lr}</small>`:''}</span>
         <button class="step" data-step="${e.id}" data-i="${i}" data-d="-1" aria-label="${i+1}세트 1회 빼기">◀</button>
         <select class="num" data-rep="${e.id}" data-i="${i}" aria-label="${e.name} ${i+1}세트 횟수">${opts(0,30,1,v)}</select>
         <button class="step" data-step="${e.id}" data-i="${i}" data-d="1" aria-label="${i+1}세트 1회 더하기">▶</button>
-        ${e.target&&v>=e.target?'<span class="hit">목표 달성</span>':''}</div>`).join('')}
+        ${badge}</div>`; }).join('')}
     </section>`;
   });
   const mv=state.move||{diff:60,same:30};
