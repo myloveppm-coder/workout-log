@@ -95,6 +95,15 @@ select.num{appearance:none;-webkit-appearance:none;text-align:center;text-align-
 .hit{font-size:13px;font-weight:700;color:var(--good);white-space:nowrap}
 .same{font-size:12px;color:var(--muted);line-height:1.2}
 .set .lbl small{display:block;font-size:12px;color:var(--go);margin-top:2px}
+.set2{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.sethead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.sethead b{font-family:var(--disp);font-weight:400;font-size:17px}
+.prevtag{font-size:12px;font-weight:700;color:var(--go)}
+.ctrls{display:flex;align-items:center;gap:10px}
+.ctrl{display:flex;align-items:center;gap:3px}
+.ctrl .step{width:34px;height:44px;font-size:14px;flex:0 0 auto}
+.ctrl .num{width:62px;font-size:21px;padding:7px 2px;flex:0 0 auto}
+.x{font-size:12px;color:var(--muted);margin-left:2px}
 
 .block{background:var(--surface);border-radius:6px;padding:16px;margin-bottom:12px}
 .block h2{font-family:var(--disp);font-weight:400;font-size:20px;margin:0 0 8px}
@@ -247,9 +256,24 @@ function ro(w){ const c=w.charCodeAt(w.length-1); if(c<0xAC00||c>0xD7A3) return 
 function exDef(type,id){ return ROUTINES[type].ex.find(e=>e.id===id); }
 function restOf(e){ return (state.rest && state.rest[e.id]!=null) ? state.rest[e.id] : e.restSec; }
 function restOpts(val){ let h=''; for(let v=30; v<=240; v+=15) h+=`<option value="${v}" ${v===val?'selected':''}>${restTxt(v)}</option>`; return h; }
-function wStep(e){ return (e.id==='lateral'||e.id==='hammer') ? 1 : 2.5; }
+function wStep(e){ return ['lateral','hammer','crunch','legraise'].includes(e.id) ? 1 : 2.5; }
+function wMax(e){ return wStep(e)===1 ? 40 : (e.w ? 150 : 40); }
+function hasW(v){ return v!==''&&v!=null&&Number(v)>0; }
+function wOf(x,i){ if(!x) return ''; if(x.weights){ if(x.weights[i]!=null) return x.weights[i]; if(x.weights.length) return x.weights[x.weights.length-1]; } return x.weight??''; }
+function wLabel(e,v){ return hasW(v) ? fmtW(v)+'kg' : (e.w ? '무게 미입력' : '맨몸'); }
+function setsTxt(x){
+  const ws=x.reps.map((_,i)=>wOf(x,i));
+  if(!ws.some(hasW)) return x.reps.join(' / ');
+  if(ws.every(w=>String(w)===String(ws[0]))) return `${fmtW(ws[0])}kg · ${x.reps.join(' / ')}`;
+  return x.reps.map((r,i)=>`${hasW(ws[i])?fmtW(ws[i]):'맨몸'}×${r}`).join(' / ');
+}
+function setWeight(id,i,v){
+  const cur=draft.ex[id]; const old=cur.weights[i];
+  cur.weights[i]=v;
+  for(let j=i+1;j<cur.weights.length;j++){ if(String(cur.weights[j])===String(old)) cur.weights[j]=v; else break; }
+  cur.weight=cur.weights[0];
+}
 function moveOpts(val){ let h=''; for(let v=0; v<=180; v+=15) h+=`<option value="${v}" ${v===val?'selected':''}>${v?restTxt(v):'없음'}</option>`; return h; }
-function wMax(e){ return wStep(e)===1 ? 40 : 150; }
 function opts(min,max,step,val,dec=0,placeholder){
   let h = placeholder ? `<option value="" ${val===''||val==null?'selected':''}>${placeholder}</option>` : '';
   const vals=[]; for(let v=min; v<=max+1e-9; v=Math.round((v+step)*100)/100) vals.push(v);
@@ -281,23 +305,22 @@ function buildDraft(date,type){
   const ex0 = state.sessions.find(s=>s.date===date&&s.type===type);
   if(ex0){
     const d=JSON.parse(JSON.stringify(ex0));
-    for(const e of ROUTINES[type].ex){ if(!d.ex[e.id]) d.ex[e.id]={weight:'',reps:Array(e.sets).fill(e.target??0)}; }
+    for(const e of ROUTINES[type].ex){ if(!d.ex[e.id]) d.ex[e.id]={weight:'',weights:Array(e.sets).fill(''),reps:Array(e.sets).fill(e.target??0)}; }
+    for(const id in d.ex){ const x=d.ex[id]; if(!x.weights) x.weights=x.reps.map(()=>x.weight??''); }
     return d;
   }
   const d={date,type,ex:{},walk:{min:20,incline:12,speed:5.0},memo:''};
   for(const e of ROUTINES[type].ex){
     const last=lastExRecord(e.id,date);
-    let weight='';
-    if(e.w&&last&&last.weight!==''&&last.weight!=null){
-      weight=last.weight;
-      if(e.inc&&allHit(e,last)) weight=Math.round((Number(last.weight)+e.inc)*10)/10;
-    }
-    const raised = e.w && last && last.weight!=='' && weight!=='' && Number(weight)>Number(last.weight);
-    const reps=[]; for(let i=0;i<e.sets;i++){
-      const lr = last && last.reps[i]!=null ? last.reps[i] : null;
+    const raised = !!(e.w && e.inc && last && allHit(e,last) && hasW(wOf(last,0)));
+    const weights=[], reps=[];
+    for(let i=0;i<e.sets;i++){
+      const lw = last ? wOf(last,i) : '';
+      weights.push(hasW(lw) ? (raised ? Math.round((Number(lw)+e.inc)*10)/10 : Number(lw)) : '');
+      const lr = last && last.reps[i]!=null ? last.reps[i] : (last && last.reps.length ? last.reps[last.reps.length-1] : null);
       reps.push(raised ? (e.target??lr??0) : (lr ?? e.target ?? 0));
     }
-    d.ex[e.id]={weight,reps};
+    d.ex[e.id]={weight:weights[0],weights,reps};
   }
   return d;
 }
@@ -396,11 +419,12 @@ function scrollToNow(){
 function stepInfo(st){
   const e=exDef(draft.type,st.id), cur=draft.ex[st.id];
   const tgt=e.target?`목표 ${e.target}회`:'최대 개수';
-  const w=e.w?(cur.weight!==''?` · ${fmtW(cur.weight)}kg`:' · 무게 미입력'):'';
+  const w=` · ${wLabel(e,cur.weights?cur.weights[st.i]:cur.weight)}`;
   const last=lastExRecord(st.id,draft.date);
   let prev='';
   if(last && last.reps[st.i]!=null){
-    prev = `지난번 ${e.w&&last.weight!==''?fmtW(last.weight)+'kg × ':''}${last.reps[st.i]}회`;
+    const lw=wOf(last,st.i);
+    prev = `지난번 ${hasW(lw)?fmtW(lw)+'kg × ':''}${last.reps[st.i]}회`;
   }
   return {e, title:e.name, sub:`${st.i+1}/${e.sets}세트 · ${tgt}${w}`, prev};
 }
@@ -514,8 +538,8 @@ function renderToday(){
     const targetTxt=e.target?`${e.sets}세트 × ${e.target}회`:`${e.sets}세트 × 최대`;
     let lastTxt='처음 하는 운동이에요', upTxt='';
     if(last){
-      lastTxt=`지난번 ${fmtDate(last.date)}: ${e.w&&last.weight!==''?fmtW(last.weight)+'kg · ':''}${last.reps.join(' / ')}`;
-      if(e.w&&e.inc&&allHit(e,last)&&last.weight!=='') upTxt=`목표를 다 채웠어요. 오늘은 ${fmtW(Number(last.weight)+e.inc)}kg으로 올려요`;
+      lastTxt=`지난번 ${fmtDate(last.date)}: ${setsTxt(last)}`;
+      if(e.w&&e.inc&&allHit(e,last)&&hasW(wOf(last,0))) upTxt=`목표를 다 채웠어요. 오늘은 ${fmtW(Number(wOf(last,0))+e.inc)}kg으로 올려요`;
       else if(!e.target) upTxt=`지난번 합계 ${last.reps.reduce((a,b)=>a+b,0)}개, 오늘은 1개 더`;
     }
     html+=`<section class="ex${nowId===e.id?' now':''}" id="card-${e.id}">
@@ -529,26 +553,33 @@ function renderToday(){
       ${e.warm?`<div class="meta">${e.warm}</div>`:''}
       <div class="last">${lastTxt}</div>
       ${upTxt?`<div class="up">${upTxt}</div>`:''}
-      ${e.w?`<div class="wrow"><label for="w-${e.id}">무게</label>
-        <button class="step" data-wstep="${e.id}" data-d="-1" aria-label="무게 내리기">◀</button>
-        <select class="num" id="w-${e.id}" data-w="${e.id}">${opts(0,wMax(e),wStep(e),cur.weight,0,'선택')}</select>
-        <button class="step" data-wstep="${e.id}" data-d="1" aria-label="무게 올리기">▶</button>
-        <span class="unit">kg</span></div>`:''}
       ${cur.reps.map((v,i)=>{
         const lr = last && last.reps[i]!=null ? last.reps[i] : null;
-        const heavier = e.w && last && last.weight!=='' && cur.weight!=='' && Number(cur.weight)>Number(last.weight);
-        const lighter = e.w && last && last.weight!=='' && cur.weight!=='' && Number(cur.weight)<Number(last.weight);
+        const lw = last ? (hasW(wOf(last,i))?Number(wOf(last,i)):0) : 0;
+        const cwRaw = cur.weights[i], cw = hasW(cwRaw)?Number(cwRaw):0;
         let badge='';
-        if(lr!=null && !lighter){
-          if(heavier && v>=lr) badge='<span class="hit">▲ 무게 UP</span>';
+        if(lr!=null && cw>=lw){
+          if(cw>lw && v>=lr) badge='<span class="hit">▲ 무게 UP</span>';
           else if(v>lr) badge=`<span class="hit">▲ +${v-lr}</span>`;
-          else if(v===lr) badge='<span class="same">＝ 같음</span>';
+          else if(v===lr && cw===lw) badge='<span class="same">＝ 같음</span>';
         } else if(lr==null && e.target && v>=e.target) badge='<span class="hit">목표 달성</span>';
-        return `<div class="set"><span class="lbl">${i+1}세트${lr!=null?`<small>지난 ${lr}</small>`:''}</span>
-        <button class="step" data-step="${e.id}" data-i="${i}" data-d="-1" aria-label="${i+1}세트 1회 빼기">◀</button>
-        <select class="num" data-rep="${e.id}" data-i="${i}" aria-label="${e.name} ${i+1}세트 횟수">${opts(0,30,1,v)}</select>
-        <button class="step" data-step="${e.id}" data-i="${i}" data-d="1" aria-label="${i+1}세트 1회 더하기">▶</button>
-        ${badge}</div>`; }).join('')}
+        const prevTag = lr!=null ? `<span class="prevtag">지난 ${lw?fmtW(lw)+'kg × ':''}${lr}</span>` : '';
+        return `<div class="set2">
+          <div class="sethead"><b>${i+1}세트</b>${prevTag}${badge}</div>
+          <div class="ctrls">
+            <div class="ctrl">
+              <button class="step" data-wstep="${e.id}" data-i="${i}" data-d="-1" aria-label="${i+1}세트 무게 내리기">◀</button>
+              <select class="num" data-ws="${e.id}" data-i="${i}" aria-label="${e.name} ${i+1}세트 무게">${opts(e.w?0:wStep(e),wMax(e),wStep(e),cwRaw,0,e.w?'선택':'맨몸')}</select>
+              <button class="step" data-wstep="${e.id}" data-i="${i}" data-d="1" aria-label="${i+1}세트 무게 올리기">▶</button>
+              <span class="x">kg</span>
+            </div>
+            <div class="ctrl">
+              <button class="step" data-step="${e.id}" data-i="${i}" data-d="-1" aria-label="${i+1}세트 1회 빼기">◀</button>
+              <select class="num" data-rep="${e.id}" data-i="${i}" aria-label="${e.name} ${i+1}세트 횟수">${opts(0,30,1,v)}</select>
+              <button class="step" data-step="${e.id}" data-i="${i}" data-d="1" aria-label="${i+1}세트 1회 더하기">▶</button>
+              <span class="x">회</span>
+            </div>
+          </div></div>`; }).join('')}
     </section>`;
   });
   const mv=state.move||{diff:60,same:30};
@@ -578,7 +609,7 @@ function workoutRows(){
     let first=true;
     for(const id of order){
       const x=s.ex[id]; if(!x) continue;
-      x.reps.forEach((r,i)=>{ rows.push([s.date,wd,rt,exName(s.type,id),i+1,x.weight===''||x.weight==null?'':x.weight,r, first?(s.memo||''):'', first&&s.duration?Math.round(s.duration/6)/10:'']); first=false; });
+      x.reps.forEach((r,i)=>{ rows.push([s.date,wd,rt,exName(s.type,id),i+1,hasW(wOf(x,i))?Number(wOf(x,i)):'',r, first?(s.memo||''):'', first&&s.duration?Math.round(s.duration/6)/10:'']); first=false; });
     }
     if(s.walk&&s.walk.min) rows.push([s.date,wd,rt,'경사 걷기','','','',`${s.walk.min}분 · 경사 ${s.walk.incline}% · ${s.walk.speed}km/h`]);
   }
@@ -615,8 +646,8 @@ function renderHist(){
     </div></section>`;
   view.innerHTML=exportBox+list.map(s=>{
     const r=ROUTINES[s.type];
-    const items=r.ex.map(e=>{ const x=s.ex[e.id]; if(!x) return ''; return `<li>${e.name} <span>${e.w&&x.weight!==''?fmtW(x.weight)+'kg · ':''}${x.reps.join(' / ')}</span></li>`; }).join('')
-      + Object.keys(s.ex).filter(id=>!r.ex.some(e=>e.id===id)).map(id=>{ const x=s.ex[id]; return `<li>${OLD_NAMES[id]||id} <span>${x.weight!==''&&x.weight!=null?fmtW(x.weight)+'kg · ':''}${x.reps.join(' / ')}</span></li>`; }).join('');
+    const items=r.ex.map(e=>{ const x=s.ex[e.id]; if(!x) return ''; return `<li>${e.name} <span>${setsTxt(x)}</span></li>`; }).join('')
+      + Object.keys(s.ex).filter(id=>!r.ex.some(e=>e.id===id)).map(id=>{ const x=s.ex[id]; return `<li>${OLD_NAMES[id]||id} <span>${setsTxt(x)}</span></li>`; }).join('');
     const walk=s.walk&&s.walk.min?`<li>경사 걷기 <span>${s.walk.min}분 · ${s.walk.incline}% · ${s.walk.speed}km/h</span></li>`:'';
     const memo=s.memo?`<li>메모 <span>${esc(s.memo)}</span></li>`:'';
     const key=s.date+'|'+s.type;
@@ -739,11 +770,19 @@ view.addEventListener('click',async e=>{
   if(plate){ if(wk.on) stopGuide(); draft=buildDraft(draft.date,plate.dataset.type); render(); return; }
   const ws=e.target.closest('[data-wstep]');
   if(ws){
-    const id=ws.dataset.wstep, ex=exDef(draft.type,id), stp=wStep(ex), cur=draft.ex[id];
+    const id=ws.dataset.wstep, i=+ws.dataset.i, ex=exDef(draft.type,id), stp=wStep(ex), cur=draft.ex[id], d=Number(ws.dataset.d);
+    const v0=cur.weights[i];
     let v;
-    if(cur.weight===''||cur.weight==null){ const last=lastExRecord(id,draft.date); v = last&&last.weight!=='' ? Number(last.weight) : (stp===1?5:20); }
-    else v=Math.round((Number(cur.weight)+stp*Number(ws.dataset.d))*10)/10;
-    cur.weight=Math.min(wMax(ex),Math.max(0,v));
+    if(!hasW(v0)){
+      if(d<0) return;
+      const last=lastExRecord(id,draft.date); const lw=last?wOf(last,i):'';
+      v = hasW(lw) ? Number(lw) : (ex.w ? (stp===1?5:20) : stp);
+    } else {
+      v=Math.round((Number(v0)+stp*d)*10)/10;
+      if(!ex.w && v<stp) v='';
+    }
+    if(v!=='') v=Math.min(wMax(ex),Math.max(0,v));
+    setWeight(id,i,v);
     renderTodayKeep(); if(wk.on) renderGuide(); return;
   }
   const st=e.target.closest('[data-step]');
@@ -786,7 +825,7 @@ view.addEventListener('click',async e=>{
 });
 view.addEventListener('input',e=>{
   const t=e.target; if(!draft||tab!=='today') return;
-  if(t.dataset.w){ draft.ex[t.dataset.w].weight=t.value===''?'':Number(t.value); if(wk.on) renderGuide(); }
+  if(t.dataset.ws){ setWeight(t.dataset.ws,+t.dataset.i,t.value===''?'':Number(t.value)); if(wk.on) renderGuide(); }
   else if(t.dataset.rep){ draft.ex[t.dataset.rep].reps[+t.dataset.i]=Math.max(0,Number(t.value)||0); }
   else if(t.dataset.walk){ draft.walk[t.dataset.walk]=t.value===''?'':Number(t.value); }
   else if(t.id==='memo'){ draft.memo=t.value; }
@@ -811,7 +850,7 @@ view.addEventListener('change',async e=>{
     return;
   }
   if(t.id==='dateIn'&&t.value){ if(wk.on) stopGuide(); const same=state.sessions.find(s=>s.date===t.value); draft=buildDraft(t.value,same?same.type:suggestType(t.value)); render(); }
-  else if(t.dataset.rep||t.dataset.w){ renderTodayKeep(); if(wk.on) renderGuide(); }
+  else if(t.dataset.rep||t.dataset.ws){ renderTodayKeep(); if(wk.on) renderGuide(); }
   else if(t.dataset.move){
     state.move=state.move||{diff:60,same:30}; state.move[t.dataset.move]=Number(t.value);
     if(wk.on) steps=buildSteps(draft.type);
